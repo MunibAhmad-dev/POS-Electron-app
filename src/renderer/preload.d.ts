@@ -80,6 +80,9 @@ declare global {
       
       // Printing
       printInvoice: (htmlContent: string) => Promise<ApiResponse<void>>;
+      
+      // Assets
+      getLogo: () => Promise<ApiResponse<string>>;
     };
   }
 }

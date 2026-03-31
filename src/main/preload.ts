@@ -38,6 +38,9 @@ const api = {
   printInvoice: (htmlContent: string) => ipcRenderer.invoke('print-invoice', htmlContent),
   // In preload.ts — add this line next to printInvoice
   saveInvoicePdf: (html: string) => ipcRenderer.invoke('save-invoice-pdf', html),
+
+  // Assets
+  getLogo: () => ipcRenderer.invoke('get-logo'),
 };
 
 // Expose the API

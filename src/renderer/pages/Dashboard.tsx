@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  DollarSign, ShoppingBag, TrendingUp,
-  Package, Activity, RefreshCw, ShieldCheck
+  DollarSign, ShoppingBag, TrendingUp, Package, Activity, RefreshCw, ShieldCheck, CreditCard, Boxes
 } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Badge } from '../components/ui/badge';
+import { cn } from '../lib/utils';
+import { useNotifications } from '../components/NotificationProvider';
 
 interface Stats {
   totalSalesToday: number;
@@ -22,17 +27,23 @@ interface DashboardProps {
 
 const fmt = (n: number) => 'PKR ' + Math.round(n).toLocaleString('en-PK');
 
-const Dashboard: React.FC<DashboardProps> = ({ onLock }) => {
+export default function Dashboard({ onLock }: DashboardProps) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const { addNotification } = useNotifications();
 
-  const loadStats = async () => {
+  const loadStats = async (isManualRefresh = false) => {
     setLoading(true);
     try {
       const res = await window.api.getDashboardStats();
       setStats((res?.success && res.data) ? res.data : null);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+      if (isManualRefresh) addNotification("Dashboard refreshed", "Latest metrics loaded successfully.", "success");
+    } catch (err) { 
+      console.error(err);
+      addNotification("Refresh Failed", "Could not fetch dashboard analytics.", "error");
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   useEffect(() => {
@@ -41,114 +52,137 @@ const Dashboard: React.FC<DashboardProps> = ({ onLock }) => {
     return () => clearInterval(interval);
   }, []);
 
-  const statCards = stats
-    ? [
-        { title: "Today's Revenue", value: fmt(stats.totalSalesToday), sub: `${stats.totalTransactionsToday} sales today`, icon: DollarSign, color: 'bg-green-100 text-green-600' },
-        { title: 'This Week', value: fmt(stats.totalSalesWeek), sub: 'Last 7 days', icon: TrendingUp, color: 'bg-blue-100 text-blue-600' },
-        { title: 'This Month', value: fmt(stats.totalSalesMonth), sub: 'Current month', icon: ShoppingBag, color: 'bg-purple-100 text-purple-600' },
-        { title: 'Total Transactions', value: stats.totalTransactions.toLocaleString(), sub: 'All time', icon: Activity, color: 'bg-orange-100 text-orange-600' },
-        { title: 'Total Products', value: stats.totalProducts.toLocaleString(), sub: 'In catalogue', icon: Package, color: 'bg-indigo-100 text-indigo-600' },
-      ]
-    : [];
+  const statCards = stats ? [
+    { title: "Today's Revenue", value: fmt(stats.totalSalesToday), sub: `${stats.totalTransactionsToday} sales today`, icon: DollarSign, color: 'text-green-500', bg: 'bg-green-500/10' },
+    { title: 'This Week', value: fmt(stats.totalSalesWeek), sub: 'Last 7 days', icon: TrendingUp, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { title: 'This Month', value: fmt(stats.totalSalesMonth), sub: 'Current month', icon: ShoppingBag, color: 'text-purple-500', bg: 'bg-purple-500/10' },
+    { title: 'Total Trx', value: stats.totalTransactions.toLocaleString(), sub: 'Lifetime sales', icon: Activity, color: 'text-orange-500', bg: 'bg-orange-500/10' },
+    { title: 'Total Catalog', value: stats.totalProducts.toLocaleString(), sub: 'Active products', icon: Package, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
+  ] : [];
 
   const quickActions = [
-    { title: 'New Sale', path: '/sales', icon: ShoppingBag, color: 'bg-blue-500 hover:bg-blue-600' },
-    { title: 'Products', path: '/products', icon: Package, color: 'bg-indigo-500 hover:bg-indigo-600' },
-    { title: 'Reports', path: '/reports', icon: TrendingUp, color: 'bg-green-500 hover:bg-green-600' },
-    { title: 'Inventory', path: '/inventory', icon: Package, color: 'bg-orange-500 hover:bg-orange-600' },
+    { title: 'New Sale', path: '/sales', icon: ShoppingBag, color: 'border-blue-500/20 hover:border-blue-500/50 hover:bg-blue-500/5' },
+    { title: 'Products', path: '/products', icon: Package, color: 'border-indigo-500/20 hover:border-indigo-500/50 hover:bg-indigo-500/5' },
+    { title: 'Reports', path: '/reports', icon: TrendingUp, color: 'border-green-500/20 hover:border-green-500/50 hover:bg-green-500/5' },
+    { title: 'Inventory', path: '/inventory', icon: Boxes, color: 'border-orange-500/20 hover:border-orange-500/50 hover:bg-orange-500/5' },
   ];
 
+  if (loading && !stats) {
+    return (
+      <div className="flex h-full items-center justify-center min-h-[400px]">
+         <div className="flex flex-col items-center gap-4 text-muted-foreground">
+            <RefreshCw size={40} className="animate-spin text-primary" />
+            <p className="text-sm font-medium animate-pulse">Loading Analytics...</p>
+         </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 bg-gray-50 min-h-full">
-      <div className="flex items-center justify-between mb-6">
+    <div className="flex flex-col gap-8 pb-10">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-          <p className="text-gray-500 text-sm">
+          <h2 className="text-3xl font-bold tracking-tight">Overview</h2>
+          <p className="text-muted-foreground text-sm mt-1">
             {new Date().toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onLock}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700 border border-gray-200 bg-white px-3 py-2 rounded-lg transition-colors">
-            <ShieldCheck size={14} /> Lock
-          </button>
-          <button onClick={loadStats}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-600 border border-gray-200 bg-white px-3 py-2 rounded-lg transition-colors">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-          </button>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={onLock} className="h-9 gap-2">
+            <ShieldCheck size={16} /> <span className="hidden sm:inline">Lock Screen</span>
+          </Button>
+          <Button variant="default" size="sm" onClick={() => loadStats(true)} className="h-9 gap-2 shadow-sm">
+            <RefreshCw size={14} className={cn(loading && "animate-spin")} /> <span className="hidden sm:inline">Refresh Data</span>
+          </Button>
         </div>
       </div>
 
-      {loading && !stats ? (
-        <div className="flex items-center justify-center py-20">
-          <RefreshCw size={32} className="animate-spin text-blue-400" />
-        </div>
-      ) : (
+      {stats && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {statCards.map((card, i) => (
-              <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${card.color}`}>
-                  <card.icon size={18} />
-                </div>
-                <p className="text-xs text-gray-500 font-medium mb-1">{card.title}</p>
-                <p className="text-lg font-bold text-gray-800 leading-tight">{card.value}</p>
-                <p className="text-xs text-gray-400 mt-1">{card.sub}</p>
-              </div>
+              <Card key={i} className="hover:-translate-y-1 hover:shadow-lg transition-all duration-300 border-border/50 bg-card/50 backdrop-blur-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground uppercase">{card.title}</CardTitle>
+                  <div className={cn("p-2 rounded-lg", card.bg)}>
+                     <card.icon className={cn("h-4 w-4", card.color)} />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{card.value}</div>
+                  <p className="text-xs text-muted-foreground mt-1">{card.sub}</p>
+                </CardContent>
+              </Card>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1">
-              <h2 className="text-base font-semibold text-gray-700 mb-3">Quick Actions</h2>
-              <div className="grid grid-cols-2 gap-3">
-                {quickActions.map((a, i) => (
-                  <Link key={i} to={a.path}
-                    className={`flex flex-col items-center justify-center p-4 rounded-xl text-white shadow-sm hover:-translate-y-1 transition-transform ${a.color}`}>
-                    <a.icon size={26} className="mb-2" />
-                    <span className="text-sm font-medium">{a.title}</span>
+          <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
+            <Card className="col-span-1 lg:col-span-2 shadow-md">
+              <CardHeader>
+                <CardTitle>Quick Actions</CardTitle>
+                <CardDescription>Shortcut to main modules</CardDescription>
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-3">
+                {quickActions.map((action, i) => (
+                  <Link key={i} to={action.path} className="h-full">
+                    <div className={cn(
+                      "flex flex-col items-center justify-center p-4 h-24 rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-200 cursor-pointer",
+                      action.color
+                    )}>
+                      <action.icon size={28} className="mb-3 text-foreground/70" />
+                      <span className="text-sm font-semibold text-foreground/80">{action.title}</span>
+                    </div>
                   </Link>
                 ))}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            <div className="lg:col-span-2">
-              <h2 className="text-base font-semibold text-gray-700 mb-3">Top Selling Products</h2>
-              <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                {stats?.topProducts?.length ? (
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
-                      <tr>
-                        <th className="px-4 py-3 text-left">#</th>
-                        <th className="px-4 py-3 text-left">Product</th>
-                        <th className="px-4 py-3 text-right">Qty</th>
-                        <th className="px-4 py-3 text-right">Revenue</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
+            <Card className="col-span-1 lg:col-span-5 shadow-md">
+              <CardHeader className="pb-3 border-b border-border/40">
+                <CardTitle>Top Selling Products</CardTitle>
+                <CardDescription>Highest revenue generators this month</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                {stats.topProducts?.length ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableHead className="w-16 text-center">#</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead className="text-right">Quantity Sold</TableHead>
+                        <TableHead className="text-right pr-6">Revenue</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {stats.topProducts.map((p, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-gray-400">{i + 1}</td>
-                          <td className="px-4 py-3 font-semibold text-gray-800">{p.name}</td>
-                          <td className="px-4 py-3 text-right text-gray-600">{p.qty_sold}</td>
-                          <td className="px-4 py-3 text-right font-semibold text-green-600">{fmt(p.revenue)}</td>
-                        </tr>
+                        <TableRow key={i} className="hover:bg-muted/50 cursor-default">
+                          <TableCell className="text-center font-medium text-muted-foreground">{i + 1}</TableCell>
+                          <TableCell className="font-semibold">{p.name}</TableCell>
+                          <TableCell className="text-right">
+                             <Badge variant="outline" className="font-mono">{p.qty_sold}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right pr-6 font-semibold text-primary">{fmt(p.revenue)}</TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 ) : (
-                  <div className="py-12 text-center text-gray-400 text-sm">
-                    <ShoppingBag size={36} className="mx-auto mb-2 opacity-20" />
-                    No sales data yet.
+                  <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+                    <ShoppingBag size={48} className="opacity-10 mb-4" />
+                    <p>No sales data registered yet.</p>
                   </div>
                 )}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
+          </div>
 
-            <div className="lg:col-span-1">
-              <h2 className="text-base font-semibold text-gray-700 mb-3">Payment Analytics</h2>
-              <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4">
-                {stats?.paymentStats?.length ? (() => {
+          <Card className="shadow-md">
+            <CardHeader>
+              <CardTitle>Payment Analytics</CardTitle>
+              <CardDescription>Breakdown of revenue streams</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {stats.paymentStats?.length ? (() => {
                   const cashStat = stats.paymentStats.find(p => p.payment_method === 'cash') || { revenue: 0, count: 0 };
                   const onlineStat = stats.paymentStats.find(p => p.payment_method === 'online' || p.payment_method === 'card') || { revenue: 0, count: 0 };
                   const totalRev = (cashStat.revenue || 0) + (onlineStat.revenue || 0);
@@ -156,60 +190,57 @@ const Dashboard: React.FC<DashboardProps> = ({ onLock }) => {
                   const onlinePct = totalRev > 0 ? ((onlineStat.revenue || 0) / totalRev) * 100 : 0;
                   
                   return (
-                    <div className="space-y-4">
-                      {/* Cash */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded bg-green-100 text-green-600 flex items-center justify-center">
-                            <DollarSign size={16} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                       <div className="space-y-6">
+                         <div className="flex items-center justify-between p-4 rounded-xl border bg-card">
+                            <div className="flex items-center gap-4">
+                               <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
+                                  <DollarSign size={24} />
+                               </div>
+                               <div>
+                                  <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Cash Sales</p>
+                                  <p className="text-2xl font-bold">{fmt(cashStat.revenue || 0)}</p>
+                               </div>
+                            </div>
+                            <Badge variant="secondary" className="px-3 py-1 font-mono">{cashStat.count} txns</Badge>
+                         </div>
+                         
+                         <div className="flex items-center justify-between p-4 rounded-xl border bg-card">
+                            <div className="flex items-center gap-4">
+                               <div className="h-12 w-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
+                                  <CreditCard size={24} />
+                               </div>
+                               <div>
+                                  <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Online Payment</p>
+                                  <p className="text-2xl font-bold">{fmt(onlineStat.revenue || 0)}</p>
+                               </div>
+                            </div>
+                            <Badge variant="secondary" className="px-3 py-1 font-mono">{onlineStat.count} txns</Badge>
+                         </div>
+                       </div>
+                       
+                       <div className="flex flex-col justify-center bg-card border rounded-xl p-6">
+                          <h4 className="text-sm font-semibold text-muted-foreground mb-4 uppercase tracking-wider">Revenue Ratio</h4>
+                          <div className="flex justify-between text-sm font-bold mb-2">
+                             <span className="text-green-500 flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-green-500"/> Cash ({cashPct.toFixed(0)}%)</span>
+                             <span className="text-blue-500 flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"/> Online ({onlinePct.toFixed(0)}%)</span>
                           </div>
-                          <div>
-                            <p className="text-sm font-semibold text-gray-800">Cash Sales</p>
-                            <p className="text-xs text-gray-500">{cashStat.count} transactions</p>
+                          <div className="w-full h-4 bg-muted rounded-full overflow-hidden flex shadow-inner">
+                            <div className="bg-green-500 h-full transition-all duration-1000" style={{ width: `${cashPct}%` }}></div>
+                            <div className="bg-blue-500 h-full transition-all duration-1000" style={{ width: `${onlinePct}%` }}></div>
                           </div>
-                        </div>
-                        <p className="font-bold text-gray-800">{fmt(cashStat.revenue || 0)}</p>
-                      </div>
-
-                      {/* Online */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded bg-blue-100 text-blue-600 flex items-center justify-center">
-                            <Activity size={16} />
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-gray-800">Online Payment</p>
-                            <p className="text-xs text-gray-500">{onlineStat.count} transactions</p>
-                          </div>
-                        </div>
-                        <p className="font-bold text-gray-800">{fmt(onlineStat.revenue || 0)}</p>
-                      </div>
-
-                      {/* Bar */}
-                      <div className="pt-2">
-                        <div className="flex justify-between text-xs text-gray-500 mb-1 font-medium">
-                          <span>Cash ({cashPct.toFixed(0)}%)</span>
-                          <span>Online ({onlinePct.toFixed(0)}%)</span>
-                        </div>
-                        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden flex">
-                          <div className="bg-green-500 h-full" style={{ width: `${cashPct}%` }}></div>
-                          <div className="bg-blue-500 h-full" style={{ width: `${onlinePct}%` }}></div>
-                        </div>
-                      </div>
+                       </div>
                     </div>
                   );
                 })() : (
-                  <div className="py-8 text-center text-gray-400 text-sm">
-                    No payment data yet.
+                  <div className="py-12 text-center text-muted-foreground text-sm">
+                    No payment analytics available.
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
   );
-};
-
-export default Dashboard;
+}

@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Package, TrendingUp, Search, RefreshCw } from 'lucide-react';
+import { Package, TrendingUp, Search, RefreshCw, FolderTree, ArrowRight } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Input } from '../components/ui/input';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { cn } from '../lib/utils';
+import { useNotifications } from '../components/NotificationProvider';
 
 interface Product {
   id: number;
@@ -14,13 +21,24 @@ export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const { addNotification } = useNotifications();
 
   useEffect(() => { load(); }, []);
 
-  const load = async () => {
+  const load = async (isManual = false) => {
     setLoading(true);
-    try { const res = await window.api.getProducts(); setProducts((res?.success && res.data) ? res.data as any : []); }
-    catch {} finally { setLoading(false); }
+    try { 
+      const res = await window.api.getProducts(); 
+      if (res?.success) {
+        setProducts(res.data as any || []); 
+        if (isManual) addNotification("Refreshed", "Inventory catalogue re-synced.", "success");
+      }
+    }
+    catch { 
+      if (isManual) addNotification("Error", "Could not load inventory.", "error");
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const filtered = products.filter((p) =>
@@ -37,95 +55,131 @@ export default function Inventory() {
   if (uncategorized.length) byCategory.push({ name: 'Uncategorized', items: uncategorized });
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
+    <div className="flex flex-col gap-6 animate-in fade-in max-w-[1400px]">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Inventory</h1>
-          <p className="text-gray-500 text-sm">Product catalogue overview</p>
+          <h1 className="text-3xl font-bold tracking-tight">Inventory Catalogue</h1>
+          <p className="text-muted-foreground text-sm mt-1">Full overview of all available products and categories</p>
         </div>
-        <button onClick={load} className="p-2 text-gray-400 hover:text-blue-600 border border-gray-200 rounded-lg bg-white transition-colors">
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 mb-5">
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center gap-3">
-          <div className="bg-blue-100 text-blue-600 p-2.5 rounded-lg"><Package size={18} /></div>
-          <div>
-            <p className="text-xs text-gray-500">Total Products</p>
-            <p className="text-2xl font-bold text-gray-800">{products.length}</p>
-          </div>
-        </div>
-        <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex items-center gap-3">
-          <div className="bg-indigo-100 text-indigo-600 p-2.5 rounded-lg"><TrendingUp size={18} /></div>
-          <div>
-            <p className="text-xs text-gray-500">Categories</p>
-            <p className="text-2xl font-bold text-gray-800">{categories.length}</p>
-          </div>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => load(true)} className="gap-2 h-9 shadow-sm" disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh Inventory
+          </Button>
         </div>
       </div>
 
-      <div className="relative mb-5">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={17} />
-        <input type="text" placeholder="Search products..." value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="shadow-sm border-border/50 bg-card/50">
+          <CardHeader className="flex flex-row items-center gap-4 pb-2">
+            <div className="bg-primary/10 p-3 rounded-xl border border-primary/20"><Package className="text-primary w-5 h-5"/></div>
+            <div>
+              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Total Products</CardTitle>
+              <div className="text-3xl font-bold tabular-nums">{products.length}</div>
+            </div>
+          </CardHeader>
+        </Card>
+        <Card className="shadow-sm border-border/50 bg-card/50">
+          <CardHeader className="flex flex-row items-center gap-4 pb-2">
+            <div className="bg-orange-500/10 p-3 rounded-xl border border-orange-500/20"><FolderTree className="text-orange-500 w-5 h-5"/></div>
+            <div>
+              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Active Categories</CardTitle>
+              <div className="text-3xl font-bold tabular-nums">{categories.length}</div>
+            </div>
+          </CardHeader>
+        </Card>
       </div>
 
-      {searchTerm ? (
-        /* Flat list when searching */
-        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 font-semibold uppercase text-xs tracking-wider">
-              <tr>
-                <th className="px-5 py-3.5 text-left">Product</th>
-                <th className="px-5 py-3.5 text-left">Category</th>
-                <th className="px-5 py-3.5 text-right">Price</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.length === 0
-                ? <tr><td colSpan={3} className="px-5 py-10 text-center text-gray-400 text-sm">No results.</td></tr>
-                : filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="px-5 py-3.5 font-medium text-gray-800">{p.name}</td>
-                    <td className="px-5 py-3.5">
-                      {p.category ? <span className="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full">{p.category}</span> : '—'}
-                    </td>
-                    <td className="px-5 py-3.5 text-right font-semibold text-blue-600">{fmtPKR(p.price)}</td>
-                  </tr>
-                ))
-              }
-            </tbody>
-          </table>
+      <Card className="shadow-sm border-none bg-transparent">
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={17} />
+          <Input 
+            type="text" 
+            placeholder="Search products by name or category..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 h-11 text-base shadow-sm w-full md:max-w-md bg-card" 
+          />
         </div>
-      ) : (
-        /* Grouped by category */
-        <div className="space-y-5">
-          {byCategory.map((group) => (
-            <div key={group.name} className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-              <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                <span className="font-semibold text-gray-700">{group.name}</span>
-                <span className="text-xs text-gray-400 bg-gray-200 px-2 py-1 rounded-full">{group.items.length} items</span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 p-4">
-                {group.items.map((p) => (
-                  <div key={p.id} className="border border-gray-100 rounded-xl p-3 hover:shadow-sm transition-shadow">
-                    <p className="font-medium text-gray-800 text-sm truncate">{p.name}</p>
-                    <p className="text-blue-600 font-bold mt-1 text-sm">{fmtPKR(p.price)}</p>
+
+        {searchTerm ? (
+          /* Flat list when searching */
+          <Card className="overflow-hidden shadow-md">
+             <CardContent className="p-0">
+               <Table>
+                 <TableHeader>
+                   <TableRow className="bg-muted/30">
+                     <TableHead className="w-1/2">Product Name</TableHead>
+                     <TableHead>Category</TableHead>
+                     <TableHead className="text-right pr-6">Price</TableHead>
+                   </TableRow>
+                 </TableHeader>
+                 <TableBody>
+                   {filtered.length === 0 ? (
+                     <TableRow>
+                       <TableCell colSpan={3} className="h-32 text-center text-muted-foreground">
+                         No products found matching "{searchTerm}".
+                       </TableCell>
+                     </TableRow>
+                   ) : filtered.map((p) => (
+                     <TableRow key={p.id}>
+                       <TableCell className="font-semibold">{p.name}</TableCell>
+                       <TableCell>
+                         {p.category ? <Badge variant="secondary" className="font-mono text-[10px] uppercase">{p.category}</Badge> : <span className="text-muted-foreground">—</span>}
+                       </TableCell>
+                       <TableCell className="text-right pr-6 font-semibold text-primary">{fmtPKR(p.price)}</TableCell>
+                     </TableRow>
+                   ))}
+                 </TableBody>
+               </Table>
+             </CardContent>
+          </Card>
+        ) : (
+          /* Grouped by category */
+          <div className="space-y-6">
+            {byCategory.map((group) => (
+              <Card key={group.name} className="overflow-hidden shadow-sm border-border/60 hover:border-border transition-colors">
+                <CardHeader className="px-5 py-4 bg-muted/20 border-b flex flex-row items-center justify-between">
+                  <CardTitle className="text-[15px] font-bold text-foreground flex items-center gap-2">
+                     <FolderTree size={16} className="text-muted-foreground" />
+                     {group.name}
+                  </CardTitle>
+                  <Badge variant="outline" className="bg-background">{group.items.length} items</Badge>
+                </CardHeader>
+                <CardContent className="p-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    {group.items.map((p) => (
+                      <div key={p.id} className="group flex flex-col justify-between border border-border rounded-xl p-4 bg-card hover:bg-muted/30 hover:border-primary/30 transition-all cursor-default">
+                        <p className="font-semibold text-sm line-clamp-2 text-foreground/90 group-hover:text-primary transition-colors">{p.name}</p>
+                        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
+                           <p className="text-primary font-bold text-sm tracking-tight">{fmtPKR(p.price)}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </CardContent>
+              </Card>
+            ))}
+            
+            {byCategory.length === 0 && !loading && (
+              <div className="flex flex-col items-center justify-center py-20 bg-card border rounded-xl border-dashed">
+                <Package size={48} className="opacity-10 mb-4" />
+                <p className="text-muted-foreground font-medium">No products added yet.</p>
+                <Button variant="link" className="mt-2 text-primary" onClick={() => window.location.hash = '/products'}>
+                  Go to Products to add some <ArrowRight size={14} className="ml-1" />
+                </Button>
               </div>
-            </div>
-          ))}
-          {byCategory.length === 0 && (
-            <div className="bg-white border border-gray-100 rounded-xl p-12 text-center text-gray-400 text-sm">
-              No products added yet. Go to Products to add some.
-            </div>
-          )}
-        </div>
-      )}
+            )}
+            
+            {loading && byCategory.length === 0 && (
+               <div className="flex flex-col items-center justify-center py-20 bg-card border rounded-xl border-dashed">
+                <RefreshCw size={32} className="opacity-50 animate-spin text-primary mb-4" />
+                <p className="text-muted-foreground font-medium animate-pulse">Loading catalogue...</p>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

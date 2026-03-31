@@ -70,11 +70,14 @@ export interface POSApi {
   getReport: (period: 'today' | 'week' | 'month') => Promise<ApiResponse<any>>;
 
   // Auth
-  verifyPassword: (password: string) => Promise<boolean>;
+  verifyPassword: (password: string) => Promise<boolean | ApiResponse<{ isValid: boolean }>>;
 
   // Printing
   printInvoice: (htmlContent: string) => Promise<ApiResponse<void>>;
   saveInvoicePdf: (htmlContent: string) => Promise<ApiResponse<{ success: boolean; filePath?: string }>>;
+  
+  // Assets
+  getLogo: () => Promise<ApiResponse<string>>;
 }
 
 declare global {

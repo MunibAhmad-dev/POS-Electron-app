@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
+import { ThemeProvider } from './components/ThemeProvider';
+import { NotificationProvider } from './components/NotificationProvider';
 import Layout from './components/Layout';
 import Login from './components/Login';
 import Dashboard from './pages/Dashboard';
@@ -10,6 +13,7 @@ import Customers from './pages/Customers';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Transactions from './pages/Transactions';
+import About from './pages/About';
 
 export default function App() {
   const [isUnlocked, setIsUnlocked] = useState<boolean>(
@@ -27,9 +31,11 @@ export default function App() {
   };
 
   return (
-    <Router>
-      <Layout>
-        <Routes>
+    <ThemeProvider defaultTheme="system" storageKey="pos-ui-theme">
+      <NotificationProvider>
+        <Router>
+          <Layout>
+          <Routes>
           <Route path="/" element={!isUnlocked ? <Login onAuthenticated={handleAuthenticated} /> : <Dashboard onLock={handleLock} />} />
           <Route path="/sales" element={<Sales />} />
           <Route path="/products" element={<Products />} />
@@ -38,9 +44,13 @@ export default function App() {
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/about" element={<About />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Layout>
-    </Router>
+          </Routes>
+        </Layout>
+      </Router>
+      <Toaster position="top-right" richColors closeButton />
+      </NotificationProvider>
+    </ThemeProvider>
   );
 }

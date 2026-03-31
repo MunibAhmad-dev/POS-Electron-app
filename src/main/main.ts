@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import Database from 'better-sqlite3';
 import fs from 'fs';
@@ -307,6 +307,21 @@ function migrate(database: Database.Database) {
       database.exec('PRAGMA user_version = 12');
     }
 
+    // Migration 13: Safely ensure updated_at exists on settings
+    if (ver < 13) {
+      logger.info('Running migration 13 - Final settings fix for updated_at...');
+      try { database.exec(`ALTER TABLE settings ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`); } catch (e) { /* IGNORE */ }
+      database.exec('PRAGMA user_version = 13');
+    }
+
+    // Migration 14: Ensure legacy customers have email and address columns
+    if (ver < 14) {
+      logger.info('Running migration 14 - Injecting missing customer fields...');
+      try { database.exec(`ALTER TABLE customers ADD COLUMN email TEXT`); } catch (e) { /* IGNORE */ }
+      try { database.exec(`ALTER TABLE customers ADD COLUMN address TEXT`); } catch (e) { /* IGNORE */ }
+      database.exec('PRAGMA user_version = 14');
+    }
+
     logger.info(`Database migration completed. Current version: ${database.pragma('user_version', { simple: true })}`);
   } catch (error) {
     logger.error('Migration system failed:', error);
@@ -603,8 +618,7 @@ ipcMain.handle('update-settings', async (_, settings: any) => {
           store_address = ?, 
           store_logo = ?, 
           receipt_footer = ?, 
-          pos_password = ?,
-          updated_at = CURRENT_TIMESTAMP
+          pos_password = ?
       WHERE id = 1
     `);
 
@@ -992,23 +1006,30 @@ function buildReceiptHtml(content: string): string {
 <html>
   <head>
     <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=302px"/>
     <style>
+      @page {
+        margin: 0 !important;
+        padding: 0 !important;
+        size: 72mm auto;
+      }
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      html, body {
+      html {
         width: 72mm;
-        margin: 0;
-        padding: 0;
-        background: white;
-        color: #000;
-        overflow: hidden; /* Prevent scrollbars in PDF */
+        margin: 0 !important;
+        padding: 0 !important;
       }
       body {
         font-family: 'Courier New', Courier, monospace;
         font-size: 12px;
         line-height: 1.5;
-        padding: 8px 8px 24px 8px;
-        display: block;
+        width: 72mm;
+        margin: 0 !important;
+        padding: 6px 8px 20px 8px;
+        background: white;
+        color: #000;
+        position: absolute;
+        top: 0;
+        left: 0;
       }
       h2 { text-align: center; font-size: 14px; margin-bottom: 2px; }
       p { margin: 1px 0; }
@@ -1043,7 +1064,7 @@ function buildReceiptHtml(content: string): string {
         display: block;
         margin: 0 auto 6px;
         max-height: 48px;
-        max-width: 280px;
+        max-width: 256px;
         object-fit: contain;
       }
     </style>
@@ -1051,56 +1072,136 @@ function buildReceiptHtml(content: string): string {
   <body>${content}</body>
 </html>`;
 }
+// ============= PRINTING HELPERS =============
+const PX_TO_MICRONS = 25400 / 96;
+const RECEIPT_WIDTH_MICRONS = 72000; // 72mm thermal paper
+
+/** Load HTML in a hidden window via temp file, wait for full render. */
+async function loadHtmlWindow(html: string, width: number): Promise<BrowserWindow> {
+  const tmpFile = path.join(app.getPath('temp'), `receipt_${Date.now()}.html`);
+  fs.writeFileSync(tmpFile, html, 'utf-8');
+
+  const win = new BrowserWindow({
+    show: false,
+    width,
+    height: 800,
+    useContentSize: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    win.webContents.once('did-finish-load', () => resolve());
+    win.webContents.once('did-fail-load', (_e, code, desc) =>
+      reject(new Error(`Failed to load receipt: ${code} ${desc}`))
+    );
+    win.loadFile(tmpFile);
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 400));
+  try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+  return win;
+}
+
+/** A4-friendly receipt template for PDF saving (renders nicely in any PDF viewer). */
+function buildReceiptPdfHtml(content: string): string {
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8"/>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        background: white;
+        color: #000;
+      }
+      body {
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 13px;
+        line-height: 1.6;
+        padding: 30px 0;
+        display: flex;
+        justify-content: center;
+      }
+      .receipt {
+        width: 340px;
+        padding: 0 10px;
+      }
+      h2 { text-align: center; font-size: 18px; margin-bottom: 4px; }
+      p { margin: 2px 0; font-size: 13px; }
+      .center { text-align: center; }
+      .divider {
+        border-bottom: 1px dashed #000;
+        margin: 8px 0;
+        width: 100%;
+      }
+      .item {
+        display: flex;
+        justify-content: space-between;
+        margin: 4px 0;
+        gap: 8px;
+      }
+      .item span:first-child { flex: 1; word-break: break-word; }
+      .total-row {
+        display: flex;
+        justify-content: space-between;
+        font-weight: bold;
+        font-size: 15px;
+        margin-top: 6px;
+      }
+      .footer {
+        text-align: center;
+        margin-top: 16px;
+        font-size: 12px;
+        padding-bottom: 10px;
+      }
+      img {
+        display: block;
+        margin: 0 auto 8px;
+        max-height: 64px;
+        max-width: 300px;
+        object-fit: contain;
+      }
+    </style>
+  </head>
+  <body><div class="receipt">${content}</div></body>
+</html>`;
+}
+
 // ============= PRINTING HANDLERS =============
 ipcMain.handle('print-invoice', async (_, htmlContent: string) => {
   try {
     if (!mainWindow) throw new Error('No main window available');
 
-    const html = buildReceiptHtml(htmlContent);
-
-    const printWindow = new BrowserWindow({
-      show: false,
-      width: 302, // Exactly 72mm
-      height: 2000, 
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    });
-
-    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-
-    // Give layout engine and fonts time to stabilize
-    await new Promise(resolve => setTimeout(resolve, 600));
+    const printWindow = await loadHtmlWindow(buildReceiptHtml(htmlContent), 272);
 
     const contentHeightPx: number = await printWindow.webContents.executeJavaScript(
-      'Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)'
+      'document.body.offsetHeight'
     );
+    const heightMicrons = Math.ceil(contentHeightPx * PX_TO_MICRONS) + 2000;
 
-    const widthMicrons = 72000;
-    const heightMicrons = Math.ceil(contentHeightPx * (25400 / 96)) + 8000;
-
-    // Try actual printing first (for thermal printer)
     return new Promise((resolve) => {
       printWindow.webContents.print(
-        {
-          silent: false,
-          printBackground: true,
-          pageSize: { width: widthMicrons, height: heightMicrons },
-          margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
-          scaleFactor: 100,
-        },
-        (success, reason) => {
-          printWindow.close();
-          if (success) {
-            logger.info('Invoice printed successfully');
-            resolve({ success: true });
-          } else {
-            logger.error('Print failed:', reason);
-            resolve({ success: false, error: reason });
-          }
-        }
-      );
+  {
+    silent: false,
+    printBackground: true,
+    pageSize: { width: RECEIPT_WIDTH_MICRONS, height: heightMicrons },
+    margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
+    scaleFactor: 100,
+  },
+  (success, reason) => {
+    printWindow.close();
+    if (success) {
+      logger.info('Invoice printed successfully');
+      resolve({ success: true });
+    } else {
+      logger.error('Print failed:', reason);
+      resolve({ success: false, error: reason });
+    }
+  }
+);
     });
   } catch (error: any) {
     logger.error('Failed to print invoice:', error);
@@ -1108,7 +1209,7 @@ ipcMain.handle('print-invoice', async (_, htmlContent: string) => {
   }
 });
 
-// ── Save as properly-sized PDF (bypasses system dialog A4 issue) ──
+// ── Save receipt as A4 PDF ──
 ipcMain.handle('save-invoice-pdf', async (_, htmlContent: string) => {
   try {
     const { filePath, canceled } = await dialog.showSaveDialog({
@@ -1119,44 +1220,20 @@ ipcMain.handle('save-invoice-pdf', async (_, htmlContent: string) => {
 
     if (canceled || !filePath) return { success: false, error: 'Cancelled' };
 
-    const html = buildReceiptHtml(htmlContent);
-
-    const printWindow = new BrowserWindow({
-      show: false,
-      width: 302, // Exactly 72mm (72 / 25.4 * 96)
-      height: 2000, // Start large to get full height
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    });
-
-    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-
-    // Extra tick for font loading and layout
-    await new Promise(resolve => setTimeout(resolve, 600));
-
-    const contentHeightPx: number = await printWindow.webContents.executeJavaScript(
-      'Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)'
-    );
-
-    // Thermal widths: 
-    // 80mm = 80000 microns
-    // 72mm = 72000 microns (standard label width on 80mm rolls)
-    // 58mm = 58000 microns
-    const widthMicrons = 72000;
-    // Add 8mm bottom padding buffer
-    const heightMicrons = Math.ceil(contentHeightPx * (25400 / 96)) + 8000;
+    const printWindow = await loadHtmlWindow(buildReceiptPdfHtml(htmlContent), 595);
 
     const pdfBuffer = await printWindow.webContents.printToPDF({
       printBackground: true,
-      pageSize: { width: widthMicrons, height: heightMicrons },
-      margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
+      pageSize: 'A4',
+      margins: { marginType: 'none' },
     });
 
     printWindow.close();
     fs.writeFileSync(filePath, pdfBuffer);
     logger.info(`Receipt PDF saved: ${filePath}`);
+
+    shell.openPath(filePath);
+
     return { success: true, path: filePath };
 
   } catch (error: any) {
@@ -1208,9 +1285,13 @@ ipcMain.handle('delete-all-data', async () => {
     db.prepare('DELETE FROM sales').run();
     db.prepare('DELETE FROM customers').run();
     db.prepare('DELETE FROM products').run();
+    
+    // Reset Settings dynamically without dropping so the app doesn't crash
+    db.prepare("UPDATE settings SET store_name = 'My Restaurant', store_phone = '', store_address = '', store_logo = '', receipt_footer = 'Thank you for visiting!', pos_password = '1234' WHERE id = 1").run();
+    
     db.prepare('DELETE FROM sqlite_sequence').run(); // Reset AI counters
     db.prepare('PRAGMA foreign_keys = ON').run();
-    logger.info('All data deleted successfully');
+    logger.info('All data deleted successfully and settings factory reset');
     return { success: true };
   } catch (error: any) {
     logger.error('Failed to delete all data:', error);
@@ -1239,8 +1320,17 @@ ipcMain.handle('export-data', async () => {
 ipcMain.handle('import-data', async (_, data: any) => {
   try {
     if (!db) throw new Error('Database not initialized');
-    if (!data.settings || !data.products || !data.customers || !data.sales || !data.sale_items) {
-      throw new Error('Invalid import data format');
+    if (!data || !data.settings || !data.products || !data.customers || !data.sales || !data.sale_items) {
+      throw new Error('Invalid or corrupted import data format');
+    }
+
+    // Attempt backup before import
+    try {
+      const backupPath = path.join(app.getPath('userData'), `backup_before_import_${Date.now()}.db`);
+      await (db as any).backup(backupPath);
+      logger.info(`Pre-import backup saved to: ${backupPath}`);
+    } catch (e) {
+      logger.warn('Failed to create pre-import backup:', e);
     }
 
     db.transaction(() => {
@@ -1253,34 +1343,36 @@ ipcMain.handle('import-data', async (_, data: any) => {
       db!.prepare('DELETE FROM products').run();
       db!.prepare('DELETE FROM settings').run();
 
+      const now = new Date().toISOString();
+
       // Insert Settings
-      const insertSetting = db!.prepare('INSERT INTO settings (id, store_name, store_phone, store_address, store_logo, receipt_footer, pos_password, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const insertSetting = db!.prepare('INSERT OR REPLACE INTO settings (id, store_name, store_phone, store_address, store_logo, receipt_footer, pos_password) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const s of data.settings) {
-        insertSetting.run(s.id, s.store_name, s.store_phone, s.store_address, s.store_logo, s.receipt_footer, s.pos_password, s.updated_at);
+        insertSetting.run(s.id, s.store_name, s.store_phone, s.store_address, s.store_logo, s.receipt_footer, s.pos_password);
       }
 
       // Insert Products
-      const insertProduct = db!.prepare('INSERT INTO products (id, name, price, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
+      const insertProduct = db!.prepare('INSERT OR REPLACE INTO products (id, name, price, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
       for (const p of data.products) {
-        insertProduct.run(p.id, p.name, p.price, p.category, p.created_at, p.updated_at);
+        insertProduct.run(p.id, p.name, p.price, p.category, p.created_at || now, p.updated_at || now);
       }
 
       // Insert Customers
-      const insertCustomer = db!.prepare('INSERT INTO customers (id, name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      const insertCustomer = db!.prepare('INSERT OR REPLACE INTO customers (id, name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const c of data.customers) {
-        insertCustomer.run(c.id, c.name, c.phone, c.email, c.address, c.created_at, c.updated_at);
+        insertCustomer.run(c.id, c.name, c.phone, c.email, c.address, c.created_at || now, c.updated_at || now);
       }
 
       // Insert Sales
-      const insertSale = db!.prepare('INSERT INTO sales (id, customer_id, total, discount, tax, subtotal, date_created, payment_method, payment_status, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      const insertSale = db!.prepare('INSERT OR REPLACE INTO sales (id, customer_id, total, discount, tax, subtotal, date_created, payment_method, payment_status, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
       for (const s of data.sales) {
-        insertSale.run(s.id, s.customer_id, s.total, s.discount || 0, s.tax || 0, s.subtotal || s.total, s.date_created, s.payment_method, s.payment_status, s.status || 'Completed', s.notes);
+        insertSale.run(s.id, s.customer_id, s.total, s.discount || 0, s.tax || 0, s.subtotal || s.total, s.date_created || now, s.payment_method, s.payment_status, s.status || 'Completed', s.notes);
       }
 
       // Insert Sale Items
-      const insertSaleItem = db!.prepare('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, price, is_custom, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const insertSaleItem = db!.prepare('INSERT OR REPLACE INTO sale_items (id, sale_id, product_id, product_name, quantity, price, is_custom, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
       for (const si of data.sale_items) {
-        insertSaleItem.run(si.id, si.sale_id, si.product_id, si.product_name, si.quantity, si.price, si.is_custom, si.created_at);
+        insertSaleItem.run(si.id, si.sale_id, si.product_id, si.product_name, si.quantity, si.price, si.is_custom, si.created_at || now);
       }
 
       db!.prepare('PRAGMA foreign_keys = ON').run();
@@ -1290,6 +1382,27 @@ ipcMain.handle('import-data', async (_, data: any) => {
     return { success: true };
   } catch (error: any) {
     logger.error('Failed to import data:', error);
+    return { success: false, error: 'Import failed: ' + error.message };
+  }
+});
+
+// ============= LOGO HANDLER =============
+ipcMain.handle('get-logo', async () => {
+  try {
+    const logoFileName = 'softwarelogo.png';
+    // Support loading logo from resources path (when packaged) or current dir (in dev)
+    const logoRootPath = app.isPackaged ? process.resourcesPath : app.getAppPath();
+    const logoFilePath = path.join(logoRootPath, logoFileName);
+    
+    if (fs.existsSync(logoFilePath)) {
+      const bitmap = fs.readFileSync(logoFilePath);
+      const base64Str = Buffer.from(bitmap).toString('base64');
+      return { success: true, data: `data:image/png;base64,${base64Str}` };
+    }
+    
+    return { success: false, error: 'Logo not found' };
+  } catch (error: any) {
+    logger.error('Failed to get logo:', error);
     return { success: false, error: error.message };
   }
 });
